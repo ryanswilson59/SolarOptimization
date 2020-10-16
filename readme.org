@@ -1,0 +1,445 @@
+* Analytics
+two sources of occlusion
+self occlusion, earth occlusion
+
+earth occlusion when norm.solar<0
+self occlusion when point.solar<0
+
+how does how does the panel normal rotate. on the pole the normal is constant but a panel
+will be rotated throughout the course of a day. 
+the tangent space is getting rotated, sorta on the equator the solar panel normal is unchanging
+
+stationary planet, x,y,z axes 
+
+then any local vector pointing off of surface is defined by $$
+\hat{r}\quad \hat{\theta} \quad \hat{\phi}
+$$ 
+physical location: $$
+\theta_l
+$$ -pi/2 -z pi/2 +z
+panel orientation: $$
+\theta_p \quad \phi
+$$
+stationary planet panel normal: $$
+\hat{z}\sin(\theta_l+\theta_p) + \cos(\theta_l+\theta_p)(\hat{x}\cos(\phi)+\hat{y}\sin(\phi))
+$$
+rotating normal $$
+\hat{x}\rightarrow \hat{x}\cos(\omega_dt)+\hat{y}\sin(\omega_dt) \quad \hat{y}\rightarrow \hat{y}\cos(\omega_dt)-\hat{x}\sin(\omega_dt)
+$$
+solar frame $$
+\hat{y}\rightarrow \hat{y} \quad\hat{z}\rightarrow \hat{z}\cos(23^\circ)+\hat{x}\sin(23^\circ) \newline
+$$
+                    $$
+\hat{x}\rightarrow \hat{x}\cos(23^\circ)-\hat{z}\sin(23^\circ)
+$$
+
+can then model sun vector as $$
+\hat{x}\cos(\omega_yt)+\hat{y}\sin(\omega_yt)
+$$
+or just $$
+\hat{x}\cos(\theta_s)+\hat{y}\sin(\theta_s)
+$$
+
+
+rotating frame panel normal: zsin(stheta)+cos(stheta)*(xcos(phi+wdt)+ysin(phi+wdt))
+solar frame panel normal:
+$$
+\hat{y}cos(\theta_l+\theta_p)\sin(\phi+\omega_dt) + \hat{z}\left[\sin(\theta_l+\theta_p)\cos(23^\circ) - sin(23^\circ)\cos(\phi+\omega_dt)cos(\theta_l+\theta_p)\right]
+$$
+$$
+\hat{x}\left[ \cos(23^\circ)\cos(\theta_l+\theta_p)\cos(\phi+\omega_dt) + \sin(23^\circ)\sin(\theta_l +\theta_p) \right]
+$$
+
+then for surface normal power we have $$
+\phi=0\quad \theta_p=0
+$$
+$$
+S\cdot n= \sin(23^\circ)\sin(\theta_l)\cos(\theta_s) + \cos(23^\circ)\cos(\theta_l)\cos(\omega_dt)\cos(\theta_s)+\cos(\theta_l)\sin(\omega_dt)\sin(\theta_s)
+$$
+
+we can see all occourences of $$
+\theta_l
+$$ in the above expression were originally $$
+\theta_l + \theta_p
+$$
+
+
+want to calculate
+$$
+\int_0^{2\pi/\omega_d}dt \max(0,a+b\sin(\omega_dt))
+$$
+where
+
+$$
+a=\sin(23^\circ)\sin(\theta_l)\cos(\theta_s) 
+$$
+$$
+b= \sqrt{(\cos(23^\circ)\cos(\theta_l)\cos(\theta_s))^2+(\cos(\theta_l)\sin(\theta_s))^2}
+$$
+* Numerics
+
+#+begin_src ipython :session :async :results output
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src ipython :session :async :results output
+def panel_power_time(tday,tl,tp,ts):
+    # tday is going to measured in rads
+    a=np.sin(np.pi*23.0/180)*np.sin(tl)*np.cos(ts)
+    b1=np.cos(np.pi*23.0/180)*np.cos(tl)*np.cos(ts)
+    b2=np.cos(tl)*np.sin(ts)
+    b=np.sqrt(b1**2+b2**2)
+
+    solar_occlude=(a+b*np.sin(tday))<0
+
+    tsum=tl+tp
+    a=np.sin(np.pi*23.0/180)*np.sin(tsum)*np.cos(ts)
+    b1=np.cos(np.pi*23.0/180)*np.cos(tsum)*np.cos(ts)
+    b2=np.cos(tsum)*np.sin(ts)
+    b=np.sqrt(b1**2+b2**2)
+    v=a + b*np.sin(tday)
+
+    v[solar_occlude]=0
+    v[v<0]=0
+    return v
+
+def total_power_day(tl,tp,ts):
+    n=400
+    xs=np.linspace(0,2*np.pi,n)
+    v=np.sum(panel_power_time(xs[1:],tl,tp,ts))/float(n-1)
+    return v*24
+
+def annual_daily_power(tl,tp):
+    days=np.linspace(0,2*np.pi,100)
+    vals=[]
+    for d in days:
+        vals.append(total_power_day(tl,tp,d))
+    return vals
+
+def deg(r):
+    return r*180.0/np.pi
+
+def daily_optimal_angle(tl,ts):
+    fun=lambda x: -total_power_day(tl,x,ts)
+    sv=deg(tl)-23*np.cos(ts)
+    # sv=-45
+    return minimize(fun,-rad(sv),method='BFGS',options={"eps":1e-5,"gtol":1e-3})
+
+def multi_angle_annual_power(tl,tp_list):
+    vs=np.asarray([annual_daily_power(tl,tp) for tp in tp_list])
+    return  np.max(vs,axis=0)
+    
+    
+def annual_mult_opt(tl,n):
+    start_angs=-np.linspace(tl-rad(23),tl+rad(23),n)
+
+    fun=lambda x: -np.sum(multi_angle_annual_power(tl,x))
+    return minimize(fun,start_angs,method="BFGS")
+    
+#+end_src
+
+#+RESULTS:
+
+
+#+begin_src ipython :session :async :results raw drawer
+def rad(x):
+    return x/180.0*np.pi
+
+tday=np.linspace(0,6.3,1000)
+tl=45.0/180.0*np.pi
+# tpl=[0.0,-tl/2,-tl,-3*tl/2]
+tpl=[rad(10),0,-rad(20),-rad(45),-rad(70),]
+ts=np.pi*0
+
+labels=[]
+for v in tpl:
+    lstr="{} degrees".format(int(-v*180/np.pi))
+    line,=plt.plot(tday,panel_power_time(tday,tl,v,ts))
+    labels.append(line.set_label(lstr))
+    plt.legend()
+plt.show()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[49]:
+[[file:./obipy-resources/1vUJJg.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/1vUJJg.png">
+#+end_html
+
+
+#+begin_src ipython :session :async :results raw drawer
+tl=45/180.0*np.pi
+# tp=-67/180.0*np.pi
+angs=[22,45,68,0,-5]
+days=np.linspace(0,360,100)
+# print(annual_daily_power(tl,tp))
+labels=[]
+for ang in angs:
+    ls="{} degrees".format(ang)
+    line, =plt.plot(days,annual_daily_power(tl,-rad(ang)))
+    labels.append(line.set_label(ls))
+
+plt.title("Daily Output by Panel Angle")
+plt.ylabel("Watt Hours")
+plt.xlabel("Day in year")
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[48]:
+: <matplotlib.legend.Legend at 0x7f12f0c69ee0>
+[[file:./obipy-resources/JEToJC.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/JEToJC.png">
+#+end_html
+
+
+#+begin_src ipython :session :async :results output
+res=daily_optimal_angle(rad(45),0.0)
+print (res)
+print (deg(res['x']))
+print (total_power_day(rad(45),res['x'],0.0))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+      fun: -8.74985192394113
+ hess_inv: array([[0.15828762]])
+      jac: array([0.00098989])
+  message: 'Optimization terminated successfully.'
+     nfev: 10
+      nit: 3
+     njev: 5
+   status: 0
+  success: True
+        x: array([-0.05265772])
+[-3.01706526]
+8.74985192394113
+#+end_example
+
+#+begin_src ipython :session :async :results raw drawer
+reses=[daily_optimal_angle(rad(45),x) for x in np.linspace(0,2*np.pi,100)]
+angles=[-deg(v["x"][0]) for v in reses]
+optimal_power=[-v["fun"] for v in reses]
+line,=plt.plot(np.linspace(0,365,100),angles)
+
+line.set_label("optimal angle")
+line,=plt.plot(np.linspace(0,365,100),45-23*np.cos(np.linspace(0,2*np.pi,100)))
+line.set_label("45-23*cos(theta)")
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[47]:
+: <matplotlib.legend.Legend at 0x7f12f0d23f10>
+[[file:./obipy-resources/qxjGf2.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/qxjGf2.png">
+#+end_html
+
+#+begin_src ipython :session :async :results raw drawer
+plt.figure(figsize=(12,8))
+tl=45/180.0*np.pi
+# tp=-67/180.0*np.pi
+angs=[22,45,68,0,-5]
+days=np.linspace(0,360,100)
+# print(annual_daily_power(tl,tp))
+labels=[]
+for ang in angs:
+    ls="{} degrees".format(ang)
+    line, =plt.plot(days,annual_daily_power(tl,-rad(ang)))
+    labels.append(line.set_label(ls))
+line,=plt.plot(days,optimal_power)
+line.set_label("daily optimal power")
+plt.title("Daily Output by Panel Angle")
+plt.ylabel("Watt Hours")
+plt.xlabel("Day in year")
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[46]:
+: <matplotlib.legend.Legend at 0x7f12f0f2f250>
+[[file:./obipy-resources/sVdFdU.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/sVdFdU.png">
+#+end_html
+
+
+#+begin_src ipython :session :async :results raw drawer
+v=( multi_angle_annual_power(rad(45),[-rad(18),-rad(62)]))
+plt.plot(v)
+plt.plot(annual_daily_power(rad(45),-rad(45)))
+plt.ylabel("Daily Solar Hours")
+plt.xlabel("Time of Year")
+plt.title("Annual Power Output for Best of 18 and 62 Degrees")
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[50]:
+: Text(0.5, 1.0, 'Annual Power Output for Best of 18 and 62 Degrees')
+[[file:./obipy-resources/8OT6E9.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/8OT6E9.png">
+#+end_html
+
+#+begin_src ipython :session :async :results output
+v= annual_mult_opt(rad(45),1)
+print (v)
+print (-deg(v["x"]))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+      fun: -718.6442858132651
+ hess_inv: array([[0.00149376]])
+      jac: array([0.])
+  message: 'Optimization terminated successfully.'
+     nfev: 10
+      nit: 3
+     njev: 5
+   status: 0
+  success: True
+        x: array([-0.73289652])
+[41.99187756]
+#+end_example
+
+#+begin_src ipython :session :async :results output
+v= annual_mult_opt(rad(45),2)
+print (v)
+print (-deg(v["x"]))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+      fun: -770.2286799976744
+ hess_inv: array([[ 0.00347945, -0.00154059],
+       [-0.00154059,  0.00292125]])
+      jac: array([ 0.00000000e+00, -7.62939453e-06])
+  message: 'Optimization terminated successfully.'
+     nfev: 36
+      nit: 8
+     njev: 12
+   status: 0
+  success: True
+        x: array([-0.31863717, -1.07768231])
+[18.25656485 61.74664804]
+#+end_example
+
+#+begin_src ipython :session :async :results output
+v= annual_mult_opt(rad(45),3)
+print (v)
+print (-deg(v["x"]))
+#+end_src
+
+#+RESULTS:
+#+begin_example
+      fun: -777.4816336865739
+ hess_inv: array([[ 3.53287070e-03,  1.00949933e-05, -9.19730942e-06],
+       [ 1.00949933e-05,  5.50122334e-03, -5.50418939e-05],
+       [-9.19730942e-06, -5.50418939e-05,  3.26566042e-03]])
+      jac: array([ 7.62939453e-06, -7.62939453e-06, -7.62939453e-06])
+  message: 'Optimization terminated successfully.'
+     nfev: 60
+      nit: 10
+     njev: 15
+   status: 0
+  success: True
+        x: array([-0.21836319, -0.69812937, -1.15474846])
+[12.51128911 39.99986617 66.1622129 ]
+#+end_example
+
+#+begin_src ipython :session :async :results raw drawer
+plt.figure(figsize=(12,8))
+line,=plt.plot(optimal_power)
+line.set_label("method theoretical max power")
+v=( multi_angle_annual_power(rad(45),[-rad(13),-rad(40),-rad(66)]))
+t,=plt.plot(v)
+t.set_label("3 positions optimal power")
+t,=plt.plot(multi_angle_annual_power(rad(45),[-rad(18),-rad(62)]))
+t.set_label("2 positions optimal power")
+t,=plt.plot(annual_daily_power(rad(45),-rad(42)))
+
+t.set_label("completely fixed panel")
+plt.ylabel("Daily Solar Hours")
+plt.xlabel("Time of Year")
+plt.title("Annual Power Output for Best of 13, 40, and 66 Degrees")
+plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[51]:
+: <matplotlib.legend.Legend at 0xj7f12f0c0f1f0>
+[[file:./obipy-resources/hVzc9W.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/hVzc9W.png">
+#+end_html
+
+#+begin_src ipython :session :async :results output
+v1=multi_angle_annual_power(rad(45),[-rad(42)])
+efficiency_1=np.sum(v1)/np.sum(optimal_power)
+print("1 angles achieves {:.1f}% efficiency".format(efficiency_1*100))
+
+v3=multi_angle_annual_power(rad(45),[-rad(13),-rad(40),-rad(66)])
+efficiency_3=np.sum(v3)/np.sum(optimal_power)
+inc3=(efficiency_3/efficiency_1)-1
+print("3 angles achieves {:.1f}% efficiency: {:.1f}% more than one position"
+      .format(efficiency_3*100,inc3*100))
+
+
+v2=multi_angle_annual_power(rad(45),[-rad(18),-rad(62)])
+efficiency_2=np.sum(v2)/np.sum(optimal_power)
+inc2=(efficiency_2/efficiency_1)-1
+print("2 angles achieves {:.1f}% efficiency: {:.1f}% more than one position".format(efficiency_2*100,inc2*100))
+
+
+#+end_src
+
+#+RESULTS:
+: 1 angles achieves 91.8% efficiency
+: 3 angles achieves 99.3% efficiency: 8.2% more than one position
+: 2 angles achieves 98.4% efficiency: 7.2% more than one position
+
+
+#+begin_src ipython :session :async :results raw drawer
+plt.title("")
+t,=plt.plot(v3/v1)
+# t.set_label("One fixed position vs Daily Max")
+t,=plt.plot(v2/v1)
+# t.set_label("Two fixed positions vs Daily Max")
+# plt.legend()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[52]:
+[[file:./obipy-resources/mokKvg.png]]
+:end:
+
+#+begin_html
+<img src="https://github.com/ryanswilson59/SolarOptimization/blob/master/obipy-resources/mokKvg.png">
+#+end_html
